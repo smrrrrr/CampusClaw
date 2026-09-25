@@ -1,0 +1,13 @@
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+# 本地上传的真实文件不入镜像（运行时由卷挂载提供）
+uploads/
+# 开发数据库不入镜像
+*.db
+*.db-wal
+*.db-shm
+# 开发密钥不入镜像，生产由 compose 环境变量注入
+.env

@@ -1,0 +1,29 @@
+[project]
+name = "campusclaw-backend"
+version = "0.1.0"
+description = "CampusClaw backend (FastAPI)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlalchemy>=2.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt==4.0.1",
+    "python-multipart>=0.0.9",
+    "pydantic-settings>=2.4.0",
+    # 材料上传：文本解析（PDF/PPTX/DOCX）
+    "pymupdf>=1.24.0",
+    "python-pptx>=0.6.23",
+    "python-docx>=1.1.0",
+    # AI 解题助手：调用 DeepSeek 生成回答
+    "httpx>=0.28.1",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+]

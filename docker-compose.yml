@@ -1,0 +1,49 @@
+services:
+  # 唯一对外入口：浏览器只访问 http://localhost:8080
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    # 仅 Docker 内网可达，宿主机/外网无法直连 8000
+    expose:
+      - "8000"
+    environment:
+      # SQLite 落在挂载卷内，容器重建数据不丢
+      DATABASE_URL: sqlite:////app/data/campusclaw.db
+      JWT_SECRET_KEY: campusclaw-dev-secret-change-in-production-9f8e7d6c
+      SMS_MOCK: "true"
+      # 生产关闭交互式 API 文档
+      ENABLE_DOCS: "false"
+      FRONTEND_ORIGINS: http://localhost:8080
+      # AI 解题助手 DeepSeek Key（从根目录 .env 读取，不硬编码）
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    volumes:
+      # 材料文件本体持久化（与本地开发 backend/uploads 同源）
+      - ./backend/uploads:/app/uploads
+      # SQLite 数据文件持久化
+      - ./data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    # 仅 Docker 内网可达，由 nginx 反代
+    expose:
+      - "3000"
+    environment:
+      # Next.js rewrites 的反代目标（容器内 localhost 不通，须指向服务名）
+      BACKEND_INTERNAL_URL: http://backend:8000
+      NODE_ENV: production
+    depends_on:
+      - backend
+    restart: unless-stopped

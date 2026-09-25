@@ -1,0 +1,44 @@
+# ---- 安全：环境变量与密钥（严禁提交）----
+# 任何层级下名为 .env 的文件都会被忽略，含 DEEPSEEK_API_KEY / JWT_SECRET_KEY 等
+.env
+*.env
+.env.*
+!.env.example
+
+# 如果确实需要模板，用 .env.example（不含真实值）供他人参考：
+# .env.example 里的 DEEPSEEK_API_KEY= 必须为空
+
+# ---- 数据与用户文件（严禁提交）----
+# Docker 生产 SQLite 数据卷
+data/
+# 上传的材料文件（含解析后的内容，含隐私）
+uploads/
+backend/uploads/
+frontend/uploads/
+# 任意后缀的数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- 前端 NODE 依赖与构建产物 ----
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.uv/
+.pytest_cache/
+
+# ---- 日志与本地临时文件 ----
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
