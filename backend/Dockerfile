@@ -22,4 +22,5 @@ RUN mkdir -p /app/uploads
 ENV UPLOAD_DIR=/app/uploads
 
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 直接用 .venv 里的 uvicorn，避免 `uv run` 每次启动联网解析依赖（国内网络易超时）
+CMD ["/app/.venv/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

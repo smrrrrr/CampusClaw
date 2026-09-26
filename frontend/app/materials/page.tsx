@@ -19,6 +19,7 @@ function MaterialsHome() {
   const [items, setItems] = useState<MaterialItemDTO[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [previewItem, setPreviewItem] = useState<MaterialItemDTO | null>(null);
 
   const isTeacher = userRole === "teacher";
@@ -96,10 +97,25 @@ function MaterialsHome() {
       .catch((err) => setError(err.message || "下载失败"));
   };
 
+  const handleDelete = async (item: MaterialItemDTO) => {
+    if (!window.confirm(`确定删除「${item.filename}」吗？删除后将无法恢复。`)) return;
+    setDeletingId(item.id);
+    setError("");
+    try {
+      await api.deleteMaterial(item.id);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+      if (previewItem?.id === item.id) setPreviewItem(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "删除失败");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <>
       <div className="topbar">
-        <strong>CampusClaw {isTeacher ? "教师端" : "学生端"}</strong>
+        <strong className="brand">CampusClaw {isTeacher ? "教师端" : "学生端"}</strong>
         <div className="actions">
           {isTeacher ? (
             <>
@@ -208,6 +224,23 @@ function MaterialsHome() {
                         >
                           下载
                         </button>
+                        {isTeacher && (
+                          <button
+                            className="btn"
+                            style={{
+                              width: "auto",
+                              padding: "4px 10px",
+                              fontSize: 13,
+                              marginLeft: 4,
+                              color: "#dc2626",
+                              borderColor: "#fecaca",
+                            }}
+                            onClick={() => handleDelete(item)}
+                            disabled={deletingId === item.id}
+                          >
+                            {deletingId === item.id ? "删除中…" : "删除"}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

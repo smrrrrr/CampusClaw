@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # RAG 检索（add-rag-search）
     chunk_size: int = 500          # 文本分块长度（字符）
     chunk_overlap: int = 100       # 相邻分块重叠长度（字符）
-    chunk_top_k: int = 5           # 相似度检索返回的分块数
+    chunk_top_k: int = 12           # 相似度检索返回的分块数（提高后可覆盖更多相关材料）
     embed_dim: int = 512           # 字符 n-gram 哈希向量维度
 
     # AI 解题助手：DeepSeek 生成（openai 兼容接口）

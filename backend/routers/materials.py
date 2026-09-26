@@ -1,10 +1,12 @@
-"""材料相关路由：教师上传、列表查询（班级隔离）、下载、在线预览。
+"""材料相关路由：教师上传、列表查询（班级隔离）、下载、在线预览、删除。
 
 端点分布：
-    POST /api/teacher/upload-material  — 教师上传（Depends(get_current_teacher)）
-    GET  /api/materials                 — 列表（学生/教师按 class_id 隔离）
-    GET  /api/materials/{id}/download    — 下载（class_id 鉴权）
-    GET  /api/materials/{id}/preview     — 在线预览（class_id 鉴权，inline）
+    POST   /api/teacher/upload-material              — 教师上传（Depends(get_current_teacher)）
+    GET    /api/materials                            — 列表（学生/教师按 class_id 隔离）
+    GET    /api/materials/{id}/download              — 下载（class_id 鉴权）
+    GET    /api/materials/{id}/preview               — 在线预览（class_id 鉴权，inline）
+    POST   /api/teacher/materials/{id}/reindex       — 教师手动重建索引
+    DELETE /api/teacher/materials/{id}               — 教师删除（仅任教班级，级联清理）
 """
 
 import json
@@ -39,7 +41,7 @@ from material_service import (
     validate_upload_file,
     write_physical_file,
 )
-from models import Class, Material, MaterialContent
+from models import Class, Material, MaterialChunk, MaterialContent
 from services import require_student_class_id, require_teacher_classes, write_audit_log
 
 router = APIRouter(tags=["materials"])
@@ -409,3 +411,98 @@ def reindex_material(
         "is_indexed": material.is_indexed if material else False,
         "message": "重新解析完成" if material and material.is_indexed else "解析失败，请检查文件",
     }
+
+
+# ---------------------------------------------------------------------------
+# 教师删除（仅任教班级，级联清理物理文件与索引数据）
+# ---------------------------------------------------------------------------
+
+
+def _write_delete_audit_async(
+    *,
+    user_id: int | None,
+    role: str | None,
+    path: str,
+    method: str,
+    status_code: int,
+    ip: str | None,
+) -> None:
+    """BackgroundTasks 调用的异步审计写入。"""
+    db = SessionLocal()
+    try:
+        write_audit_log(
+            db,
+            user_id=user_id,
+            role=role,
+            request_path=path,
+            method=method,
+            status_code=status_code,
+            ip_address=ip,
+        )
+    finally:
+        db.close()
+
+
+@router.delete("/api/teacher/materials/{material_id}")
+def delete_material(
+    material_id: int,
+    background: BackgroundTasks,
+    request: Request,
+    current: CurrentUser = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+):
+    """教师删除自己所任教班级的资料。
+
+    权限与隔离（对齐 upload 的 teaching_classes 校验）：
+        - 仅教师角色（Depends(get_current_teacher)）可删除，学生/家长 403
+        - material.class_id 必须在教师 teaching_classes 范围内，否则 403 + 审计
+    清理动作：
+        1. 删除物理文件（material_service.delete_physical_file）
+        2. 删除 Material 行（ondelete=CASCADE 级联清理 MaterialContent/MaterialChunk）
+        无法写入 DB 时不做任何物理删除，避免产生孤立/不可追踪文件。
+    """
+    material = _get_material_or_404(db, material_id)
+
+    # 班级隔离：仅能删除自己任教班级的材料
+    tc = current.teaching_classes or []
+    if material.class_id not in tc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权删除非任教班级材料",
+        )
+
+    relative_path = material.file_path
+
+    # 先删除 DB 相关行（material_contents / material_chunks 显式清理，
+    # 因 SQLite 未开启 foreign_keys 强制级联），失败则不动物理文件
+    try:
+        db.query(MaterialContent).filter(
+            MaterialContent.material_id == material_id
+        ).delete(synchronize_session=False)
+        db.query(MaterialChunk).filter(
+            MaterialChunk.material_id == material_id
+        ).delete(synchronize_session=False)
+        db.delete(material)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="删除材料记录失败",
+        )
+
+    # DB 记录已删成功，再清理物理文件（失败不阻塞，留警告但记录已删）
+    delete_physical_file(relative_path)
+
+    # 记录成功删除审计（异步）
+    background.add_task(
+        _write_delete_audit_async,
+        user_id=current.user_id,
+        role=current.role,
+        path=request.url.path,
+        method="DELETE",
+        status_code=200,
+        ip=request.client.host if request.client else None,
+    )
+
+    return {"message": "材料已删除", "id": material_id}

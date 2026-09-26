@@ -205,3 +205,32 @@
 
 - **WHEN** 教师 teaching_classes=[101,102] 下载 class_id=101 的材料
 - **THEN** 后端校验 101 在 teaching_classes 中，返回文件流供下载
+
+### Requirement: 教师删除资料
+
+教师(role=teacher) MUST 能够删除自己所任教班级已上传的资料（删除后，学生/其他教师均不可再访问该材料）。删除 MUST 同时移除：Material 记录、所属 MaterialContent（纯文本解析内容）、所属 MaterialChunk（分块向量）、以及磁盘上的物理文件。删除接口 MUST 通过 Depends(get_current_teacher) 拦截，学生（含家长代登录）MUST 无删除权限，调用 MUST 返回 403 Forbidden。删除前 MUST 校验目标材料的 class_id 在当前教师 JWT teaching_classes 范围内，不在范围 MUST 返回 403 Forbidden 并记录审计日志。若数据库记录删除失败，系统 MUST NOT 删除物理文件（避免产生孤立/不可追踪文件）；成功删除后 MUST 记录审计日志。
+
+#### Scenario: 教师删除任教班级资料成功
+
+- **WHEN** 教师 teaching_classes=[101,102] 登录后对 class_id=101 的某份资料发起删除
+- **THEN** 后端校验该材料 class_id=101 在 teaching_classes 中，删除 Material 记录及其 MaterialContent/MaterialChunk，并删除磁盘物理文件，返回删除成功
+
+#### Scenario: 删除后资料不可再访问
+
+- **WHEN** 教师成功删除某资料后，学生或教师再尝试下载/预览/查询该资料
+- **THEN** 系统返回 404 Not Found（记录已不存在），且 AI 检索不再召回该资料的任何分块
+
+#### Scenario: 教师尝试删除非任教班级资料被拒
+
+- **WHEN** 教师 teaching_classes=[101,102] 尝试对 class_id=201 的资料发起删除
+- **THEN** 后端校验 201 不在 teaching_classes 中，返回 403 Forbidden，记录审计日志，不删除任何数据
+
+#### Scenario: 学生尝试删除资料被拒
+
+- **WHEN** role=student 的用户（含家长代登录）尝试调用删除接口
+- **THEN** get_current_teacher 依赖校验失败，返回 403 Forbidden，记录审计日志
+
+#### Scenario: 前端仅教师展示删除入口
+
+- **WHEN** role=student 的用户查看材料列表页面
+- **THEN** 前端不展示删除按钮；删除按钮仅在 role=teacher 时展示，点击前弹确认提示

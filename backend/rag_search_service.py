@@ -34,6 +34,32 @@ def serialize_vector(vec: list[float]) -> bytes:
     return _vector_to_blob(vec)
 
 
+def _char_bigrams(text: str) -> set[str]:
+    """字符二元组集合（用于轻量标题预筛，中文无需分词）。"""
+    s = text.strip()
+    return {s[i : i + 2] for i in range(len(s) - 1)} if len(s) >= 2 else ({s} if s else set())
+
+
+def _prefilter_materials(query_text: str, candidates: list[tuple[int, str]]) -> set[int]:
+    """轻量标题预筛：仅让与问题共享实质关键词的材料参与向量排序。
+
+    由于字符 n-gram 哈希向量对"字面重叠但不同章节"的材料可能误排高分
+    （如 3D 空间几何问题把"平面解析几何"排到前面），在向量排序前按
+    材料标题与问题的字符二元组重叠做一个粗筛，排除明确不相关的章节。
+
+    兜底：若按重叠筛选后没有任何材料保留（如班级只有统练/期中/月考等
+    泛化标题材料），则回退为保留全部候选，避免检索结果为空。
+    """
+    q_bigrams = _char_bigrams(query_text)
+    if not q_bigrams or not candidates:
+        return {mid for mid, _ in candidates}
+
+    keep = {mid for mid, filename in candidates if q_bigrams & _char_bigrams(filename)}
+    if not keep:
+        return {mid for mid, _ in candidates}  # 兜底：全保留
+    return keep
+
+
 def retrieve_top_k(
     db: Session,
     class_ids: list[int],
@@ -50,6 +76,17 @@ def retrieve_top_k(
     if not class_ids or not query_text or not query_text.strip():
         return []
 
+    # 材料标题预筛（轻量关键词），减少跨章节误排
+    materials = (
+        db.query(Material.id, Material.filename)
+        .filter(
+            Material.class_id.in_(class_ids),
+            Material.is_indexed.is_(True),
+        )
+        .all()
+    )
+    eligible_material_ids = _prefilter_materials(query_text, materials)
+
     q_vec = embed_text(query_text)
     rows = (
         db.query(MaterialChunk, Material.filename)
@@ -57,6 +94,7 @@ def retrieve_top_k(
         .filter(
             MaterialChunk.class_id.in_(class_ids),
             Material.is_indexed.is_(True),
+            MaterialChunk.material_id.in_(eligible_material_ids),
         )
         .all()
     )

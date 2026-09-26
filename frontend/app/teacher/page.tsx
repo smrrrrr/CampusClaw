@@ -67,7 +67,7 @@ function TeacherHome() {
   return (
     <>
       <div className="topbar">
-        <strong>CampusClaw 教师端</strong>
+        <strong className="brand">CampusClaw 教师端</strong>
         <div className="actions">
           <Link href="/teacher/upload" className="btn" style={{ width: "auto", padding: "8px 16px", textDecoration: "none" }}>
             上传资料

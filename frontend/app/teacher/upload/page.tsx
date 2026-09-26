@@ -84,7 +84,7 @@ function UploadHome() {
   return (
     <>
       <div className="topbar">
-        <strong>CampusClaw 教师端</strong>
+        <strong className="brand">CampusClaw 教师端</strong>
         <div className="actions">
           <Link href="/teacher" className="btn" style={{ width: "auto", padding: "8px 16px", textDecoration: "none" }}>
             返回工作台
@@ -148,7 +148,7 @@ function UploadHome() {
               <div style={{ marginBottom: 16 }}>
                 <div className="hint" style={{ marginBottom: 4 }}>上传进度：{progress}%</div>
                 <div style={{ background: "#e5e7eb", borderRadius: 4, height: 8, overflow: "hidden" }}>
-                  <div style={{ width: `${progress}%`, background: "#3b82f6", height: "100%", transition: "width 0.2s" }} />
+                  <div style={{ width: `${progress}%`, background: "#9d2f3b", height: "100%", transition: "width 0.2s" }} />
                 </div>
               </div>
             )}

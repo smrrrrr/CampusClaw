@@ -100,6 +100,25 @@ file_path 字段存储完整相对路径（如 `101/1620000000_lesson1.pdf`）�
 
 支持按 description/tags 模糊搜索、按 created_at 排序、分页。
 
+### 9. 教师删除材料
+
+新增 `DELETE /api/teacher/materials/{material_id}` 端点（Depends(get_current_teacher)），仅教师可删，前端仅对 role=teacher 渲染删除按钮。
+
+权限与隔离：删除前校验 `material.class_id in current.teaching_classes`，不在则 403 + 审计（复用 upload 的 teaching_classes 校验语义），对齐"查询层强制 class_id 隔离作为最终防御"约束。
+
+清理顺序（保证不产生孤立文件）：
+
+1. 显式删除 `material_contents` 与 `material_chunks` 中该 material_id 的行（因 SQLite 未开启 `PRAGMA foreign_keys=ON`，`ondelete=CASCADE` 不会自动触发，必须显式清理，避免残留旧分块进入 AI 检索或留下脏数据）。
+2. `db.delete(material)` + commit；该步骤失败则整体 rollback，且 MUST NOT 删除物理文件，返回 500（避免孤立、不可追踪的文件）。
+3. DB 提交成功后调用 `material_service.delete_physical_file(file_path)` 删除磁盘文件（幂等，文件不存在静默）。
+4. 异步记录成功删除的审计日志。
+
+**并发竞态防护**：删除与首次上传触发的异步 `run_indexing`（BackgroundTasks）可能并发。为确保异步索引不会为已删除材料重建孤立的 `material_contents`/`material_chunks`，`run_indexing` 在写入 content/chunk 前重新校验 `Material` 记录仍存在，已被删除则 rollback 并跳过写入（见 design.md 决策 5 的索引流程）。
+
+删除成功后，AI 检索（`rag_search_service.retrieve_top_k` 的 `JOIN material`）天然不再召回该材料分块，列表/下载/预览因 Material 行不存在返回 404。
+
+**替代方案**：软删除（is_deleted 标记）。**未选原因**：材料为临时学习资料，物理删除更贴合"删除后不可访问"，且无版本回溯需求，避免数据累积与检索过滤漏配。
+
 ## Risks / Trade-offs
 
 - **[本地文件存储单机限制]** → 文件存储在单机文件系统，无法水平扩展。**缓解**：校园级应用单机部署足够；Docker 卷挂载宿主机目录可配合宿主机备份。

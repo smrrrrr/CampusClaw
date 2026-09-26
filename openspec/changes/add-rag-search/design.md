@@ -56,10 +56,11 @@ created_at TIMESTAMP
 查询路径（`rag_search_service.retrieve_top_k`）：
 
 1. 由 JWT 取 `class_id`（学生）或 `teaching_classes`（教师），**不信任前端参数**（复用 `require_student_class_id` / `check_class_id_consistency`）。
-2. 将用户问题文本做与分块相同的向量化，得到查询向量 `q`。
-3. `SELECT id, material_id, class_id, chunk_index, content, embedding FROM material_chunk WHERE class_id = :class_id`（教师时 `class_id IN :teaching_classes`），并 `JOIN material ON material.is_indexed = true`。
-4. 逐块计算余弦相似度 `sim = dot(q, e) / (|q|*|e|)`，按 `sim` 降序取 Top-K（默认 `K = 5`）。
-5. 召回结果为 `[{material, filename, chunk_index, content, score}]`，供溯源与上下文注入。
+2. **跨章节标题预筛（轻量关键词层）**：先 `SELECT id, filename FROM material WHERE class_id = :cid AND is_indexed = true` 取候选材料，用 `_prefilter_materials`（字符二元组 bigram 重叠）过滤掉与问题无实质关键词共现、仅字面重叠的不同章节材料；若无保留则回退全保留（避免泛化标题材料导致空结果）。此层放在向量排序之前，弥补字符 n-gram 哈希向量对"字面重叠但章节不同"材料误排高分的问题。
+3. 将用户问题文本做与分块相同的向量化，得到查询向量 `q`。
+4. `SELECT id, material_id, class_id, chunk_index, content, embedding FROM material_chunk WHERE class_id = :class_id`（教师时 `class_id IN :teaching_classes`），并 `JOIN material ON material.is_indexed = true`，且 `material_id IN (预筛保留的材料)`。
+5. 逐块计算余弦相似度 `sim = dot(q, e) / (|q|*|e|)`，按 `sim` 降序取 Top-K（默认 `K = 12`，`config.chunk_top_k`）。
+6. 召回结果为 `[{material, filename, chunk_index, content, score}]`，供溯源与上下文注入。
 
 隔离：查询层强制 `class_id` 过滤（对齐项目硬性约束"查询层强制 class_id 过滤作为最终防御"）。
 
@@ -81,9 +82,23 @@ created_at TIMESTAMP
 
 旧 `get_indexed_contexts` 被 `rag_search_service.retrieve_top_k` 取代；`ask_ai` 改用召回块作上下文，并返回 `citations`。
 
+### 6. 回答渲染与布局分离
+
+前端 AI 解题助手回答区引入以下方案（纯前端 + 后端 prompt 约束，属于独立增量，与 RAG 检索/溯源功能共享同一变更）：
+
+- **Markdown + LaTeX 渲染**：新增 `react-markdown` 组件，配合 `remark-math`（解析 LaTeX）与 `rehype-katex`（渲染为数学符号），并 import `katex/dist/katex.min.css`。封装为 `components/markdown-answer.tsx`，统一承载 AI 回答文本渲染。
+- **公式定界符限制**：`remark-math@6` 只识别 `$...$`/`$$...$$`，不识别 `\(...\)`/`\[...\]`（后者会源码原样透传，导致 `\vec`/`\frac` 字样暴露）。因此后端 `llm_service.SYSTEM_PROMPT` MUSt 要求 DeepSeek 用 `$...$`（行内）/`$$...$$`（独立独占一行）包裹公式，并给出 `\frac{}{}`、`\sqrt{}`、`\vec{a}` 等写法的示例。
+- **回答禁含检索过程元话语**：`SYSTEM_PROMPT` 明确禁止回答正文出现「据资料重建」「公式本体未收录」「文档格式限制」「仅保留标题」「教材标准公式」「召回文本未含公式本体」「资料检索」「按标准形式给出」等内部处理/检索状态/过渡性说明；资料仅提及某公式知识点但召回文本未含公式本体时，模型可直接以 `$...$`/`$$...$$` 呈现该标准公式并正常 `[n]` 标源，直接进入解题与结论。
+- **回答与参考资料独立成卡**：「回答正文」与「参考资料」从视觉上拆分为两个独立卡片（回答卡为灰底、资料卡为白底带边框），参考资料不再内嵌于回答卡片内部。
+- **参考资料仅显示文件名**：参考资料卡片条目只展示来源材料文件名（不带块序号、不展示原文摘要，避免大段摘要撑高卡片），点击条目跳转到材料预览。同一份材料的多个分块召回时，按文件名去重，同份资料只出现一次。
+- **无引用不渲染资料卡**：当 `citations` 为空时，仅渲染回答卡片，不渲染空的参考资料卡片。
+
+该方案中，前端仅扩展展示层（不改后端响应结构 `answer + citations`）；后端仅调整 `llm_service.SYSTEM_PROMPT` 引导模型输出可被渲染的公式定界符并抑制元话语，不改变接口结构。
+
 ## Risks / Trade-offs
 
-- **[字符 n-gram 哈希向量语义较弱]** → 可能召回字面重叠但语义相关性一般的块。**缓解**：支持替换 embedding 实现（接口隔离）；Top-K + 溯源让学生能核对；作业为范围限定检索，字面相关已足够演示。
+- **[字符 n-gram 哈希向量语义较弱]** → 可能召回字面重叠但语义相关性一般的块。**缓解**：支持替换 embedding 实现（接口隔离）；Top-K + 溯源让学生能核对；作业为范围限定检索，字面相关已足够演示。另在向量排序前增加跨章节标题预筛（`_prefilter_materials`），按问题与标题的字符二元组重叠排除「字面重叠但章节不同」的材料。
+- **[标题预筛误伤泛化标题材料]**（统练/期中/月考等标题不含问题关键词的材料可能被过滤）→ **缓解**：预筛无任何保留时回退全保留；预筛按整份候选材料而非单块判定，仅影响跨章节误排这一特定场景；根本解法仍是升级为本地语义向量（SBERT），见 Open Questions。
 - **[分块边界割裂语义]** → 定义恰好在句子中间的块。**缓解**：按段落/换行对齐优先；重叠 100 字符补偿边界信息损失。
 - **[全班块全量载入内存计算相似度]** → 班级块基数小，问题不大；块数增长时**缓解**：可按关键词/BM25 预筛后再精确向量排序，留作优化项。
 - **[向量化失败致整份材料未索引]** → **缓解**：与既有 parse_error 一致，仅该材料不可检索，不影响其他材料与上传。

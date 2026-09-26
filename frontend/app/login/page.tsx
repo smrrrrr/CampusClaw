@@ -118,7 +118,7 @@ export default function LoginPage() {
   return (
     <div className="centered">
       <div className="card">
-        <h1>CampusClaw 校园助手</h1>
+        <h1 style={{ color: "#7e202b" }}>CampusClaw 校园助手</h1>
 
         <div className="tabs">
           <button

@@ -58,3 +58,12 @@
 - [x] 8.4 端到端验证：同名文件上传→自动重命名→DB 写入失败→物理文件回滚删除，验证异常处理
 - [x] 8.5 端到端验证：Docker 容器重启→已上传文件和元数据完好→可正常下载，验证持久化
 - [x] 8.6 端到端验证：AI 检索接口仅返回 is_indexed=true 的材料文本，验证知识库索引关联
+
+## 9. 教师删除材料
+
+- [x] 9.1 实现 DELETE /api/teacher/materials/{id} 端点（Depends(get_current_teacher)），仅教师可删、学生 403；删除前校验 material.class_id IN teaching_classes，非任教班级 403 + 审计，验证越权被拒
+- [x] 9.2 实现删除清理：显式删除 material_contents / material_chunks 该 material_id 的行 + 删除 Material 记录 + 删除磁盘物理文件；DB 删除失败时不删物理文件并返回 500，验证无孤立文件
+- [x] 9.6 在 run_indexing 写入 content/chunk 前重新校验 Material 存在，删除与异步索引并发时不重建孤儿行；验证上传后立即删除不留 content/chunk 残留
+- [x] 9.3 实现成功删除审计日志（异步），验证删除动作被记录
+- [x] 9.4 前端材料列表仅对 role=teacher 展示删除按钮，点击前 confirm 确认，删除成功后本地移除条目并刷新；验证学生无删除入口
+- [x] 9.5 端到端验证：教师删除任教班级资料 → 记录/内容/分块/物理文件全部移除 → 列表/下载/预览返回 404、AI 检索不再召回；验证删除后不可访问

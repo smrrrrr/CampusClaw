@@ -5,6 +5,7 @@ import { useState } from "react";
 import { AuthGate } from "@/components/auth-guard";
 import { LogoutButton } from "@/components/logout-button";
 import { SwitchChildButton } from "@/components/switch-child";
+import MarkdownAnswer from "@/components/markdown-answer";
 import { api, ApiError, type AnswerCitation } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 
@@ -45,7 +46,7 @@ function StudentHome() {
   return (
     <>
       <div className="topbar">
-        <strong>CampusClaw 学生端</strong>
+        <strong className="brand">CampusClaw 学生端</strong>
         <div className="actions">
           <Link href="/materials" className="btn" style={{ width: "auto", padding: "8px 16px", textDecoration: "none" }}>
             学习资料
@@ -93,32 +94,29 @@ function StudentHome() {
               </form>
               {error && <div className="error" style={{ marginBottom: 8 }}>{error}</div>}
               {answer && (
-                <div style={{ background: "#f9fafb", padding: 12, borderRadius: 8, fontSize: 14 }}>
-                  <div style={{ whiteSpace: "pre-wrap" }}>{answer}</div>
-                  {citations.length > 0 && (
-                    <div style={{ marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>
-                      <strong style={{ fontSize: 13 }}>参考资料</strong>
-                      <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 13, lineHeight: 1.8 }}>
-                        {citations.map((c, i) => (
-                          <li key={`${c.material_id}-${c.chunk_index}`}>
-                            <Link href="/materials" style={{ color: "#2563eb" }}>
-                              {c.filename}（块 {c.chunk_index}）
-                            </Link>
-                            <span style={{ color: "#6b7280" }}>
-                              {c.excerpt.replace(/^.{0,0}/, " ")}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                <div style={{ background: "#f9fafb", padding: 12, borderRadius: 8, fontSize: 14, marginBottom: 12 }}>
+                  <MarkdownAnswer text={answer} />
+                </div>
+              )}
+              {citations.length > 0 && (
+                <div style={{ background: "#fff", border: "1px solid #e5e7eb", padding: 12, borderRadius: 8 }}>
+                  <strong style={{ fontSize: 13 }}>参考资料</strong>
+                  <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 13, lineHeight: 1.8 }}>
+                    {[...new Set(citations.map((c) => c.filename))].map((filename) => (
+                      <li key={filename} style={{ marginBottom: 2 }}>
+                        <Link href="/materials" style={{ color: "#9d2f3b" }}>
+                          {filename}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
 
             <ul style={{ lineHeight: 2, paddingLeft: 20 }}>
               <li>
-                <Link href="/materials" style={{ color: "#2563eb" }}>查看本班资料</Link>
+                <Link href="/materials" style={{ color: "#9d2f3b" }}>查看本班资料</Link>
               </li>
               <li>提交作业</li>
               <li>查看个人错题本</li>

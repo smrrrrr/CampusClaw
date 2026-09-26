@@ -204,22 +204,183 @@ def _extract_pptx(file_path: Path) -> str:
     return "\n".join(parts).strip()
 
 
+# OOXML 命名空间：Word 正文(w) 与 数学公式(OMML, m)
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+
+
+def _qn(tag: str) -> str:
+    """取带命名空间元素 tag 的 localname（如 '{ns}oMath' -> 'oMath'）。"""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _omml_to_latex(node) -> str:
+    """递归把 OMML 数学节点转为 LaTeX 字符串。
+
+    python-docx 的 .text 忽略 OMML（m:oMath）导致 Word 公式整体丢失。
+    这里用 lxml 遍历 m: 节点，覆盖常见结构（分式/上下标/定界符/根式/
+    上横线/向量箭头/求和积分等），把公式还原为 KaTeX 可渲染的 LaTeX。
+    """
+    name = _qn(node.tag)
+    children = list(node)
+    sub = node.find(f"{{{_M_NS}}}sub")
+    sup = node.find(f"{{{_M_NS}}}sup")
+    base = node.find(f"{{{_M_NS}}}e")
+
+    if name == "t":
+        return node.text or ""
+    if name == "r":  # 公式 run
+        return "".join(t.text or "" for t in node.findall(f"{{{_M_NS}}}t"))
+    if name in ("e", "num", "den", "fName", "nary"):
+        pass  # 交由下层分发/通用拼接
+    if name == "f":  # 分式
+        num = node.find(f"{{{_M_NS}}}num")
+        den = node.find(f"{{{_M_NS}}}den")
+        n = _omml_to_latex(num) if num is not None else " "
+        d = _omml_to_latex(den) if den is not None else " "
+        return f"\\frac{{{n}}}{{{d}}}"
+    if name == "sSup":
+        s = _omml_to_latex(sup) if sup is not None and list(sup) else ""
+        b = _omml_to_latex(base) if base is not None else ""
+        return f"{b}^{{{s}}}" if s else b
+    if name == "sSub":
+        s = _omml_to_latex(sub) if sub is not None and list(sub) else ""
+        b = _omml_to_latex(base) if base is not None else ""
+        return f"{b}_{{{s}}}" if s else b
+    if name == "sSubSup":
+        sb = _omml_to_latex(sub) if sub is not None and list(sub) else ""
+        sp = _omml_to_latex(sup) if sup is not None and list(sup) else ""
+        b = _omml_to_latex(base) if base is not None else ""
+        return f"{b}_{{{sb}}}^{{{sp}}}" if (sb or sp) else b
+    if name == "d":  # 带定界符（括号）
+        content = _omml_to_latex(base) if base is not None else ""
+        beg, end = "(", ")"
+        dpr = node.find(f"{{{_M_NS}}}dPr")
+        if dpr is not None:
+            b = dpr.find(f"{{{_M_NS}}}begChr")
+            en = dpr.find(f"{{{_M_NS}}}endChr")
+            if b is not None and b.get(f"{{{_W_NS}}}val"):
+                beg = _MATH_DELIM.get(b.get(f"{{{_W_NS}}}val"), b.get(f"{{{_W_NS}}}val"))
+            if en is not None and en.get(f"{{{_W_NS}}}val"):
+                end = _MATH_DELIM.get(en.get(f"{{{_W_NS}}}val"), en.get(f"{{{_W_NS}}}val"))
+        return f"\\left{beg}{content}\\right{end}"
+    if name == "rad":  # 根式
+        content = _omml_to_latex(base) if base is not None else ""
+        deg = node.find(f"{{{_M_NS}}}deg")
+        if deg is not None and list(deg):
+            return f"\\sqrt[{_omml_to_latex(deg)}]{{{content}}}"
+        return f"\\sqrt{{{content}}}"
+    if name == "bar":  # 上横线（均值/约等）
+        return f"\\overline{{{_omml_to_latex(base)}}}" if base is not None else ""
+    if name == "acc":  # 上标注符（向量箭头等）
+        content = _omml_to_latex(base) if base is not None else ""
+        chr_el = node.find(f"{{{_M_NS}}}accPr/{{{_M_NS}}}chr")
+        c = chr_el.get(f"{{{_W_NS}}}val") if chr_el is not None else None
+        if c in ("→", "⟶", "↦", "⟹"):
+            return f"\\vec{{{content}}}"
+        if c not in (None, "̂", "~"):
+            return f"\\overset{{{c}}}{{{content}}}"
+        return content
+    if name == "nary":  # 求和 / 积分 / 连乘
+        content = _omml_to_latex(base) if base is not None else ""
+        npr = node.find(f"{{{_M_NS}}}naryPr")
+        chr_el = npr.find(f"{{{_M_NS}}}chr") if npr is not None else None
+        c = chr_el.get(f"{{{_W_NS}}}val") if chr_el is not None else "∫"
+        op = {
+            "∫": "int", "∮": "oint", "∑": "sum", "∏": "prod",
+            "⋃": "bigcup", "⋂": "bigcap", "⊕": "bigoplus", "⋀": "bigwedge",
+        }.get(c, "int")
+        sb = _omml_to_latex(sub) if sub is not None and list(sub) else ""
+        sp = _omml_to_latex(sup) if sup is not None and list(sup) else ""
+        s = f"\\{op}"
+        if sb:
+            s += f"_{{{sb}}}"
+        if sp:
+            s += f"^{{{sp}}}"
+        return f"{s} {content}"
+    if name == "func":  # 函数应用（如正余弦）
+        fn = node.find(f"{{{_M_NS}}}fName")
+        fname = _omml_to_latex(fn) if fn is not None else ""
+        body = _omml_to_latex(base) if base is not None else ""
+        return f"{fname}{body}"
+    # 兜底：非结构节点（mPr/naryPr/dPr/矩阵等）仅透传子节点
+    return "".join(_omml_to_latex(c) for c in children)
+
+
+_MATH_DELIM = {
+    "‖": "\\|", "⟨": "\\langle", "⟩": "\\rangle", "{": "\\{", "}": "\\}",
+    "⌊": "\\lfloor", "⌋": "\\rfloor", "⌈": "\\lceil", "⌉": "\\rceil",
+}
+
+
+def _docx_element_text(elem) -> str:
+    """遍历 w:p 或 w:tc 的 XML 子节点，提取普通文本 + 公式(LaTeX)。
+
+    纯文本取 w:r/w:t；OMML 公式取 _omml_to_latex 并包裹为内联/块级
+    LaTeX 定界符，使 Markdown/KaTeX 能渲染。
+    """
+    parts: list[str] = []
+    for child in elem:
+        ns = child.tag.split("}", 1)[0].lstrip("{")
+        name = _qn(child.tag)
+        if ns == _M_NS:
+            latex = _omml_to_latex(child)
+            if not latex:
+                continue
+            if name == "oMathPara":
+                parts.append(f"\\[{latex}\\]")
+            else:
+                parts.append(f"\\({latex}\\)")
+        elif ns == _W_NS and name == "r":
+            txt = "".join(t.text or "" for t in child.findall(f"{{{_W_NS}}}t"))
+            if txt:
+                parts.append(txt)
+        elif name in ("hyperlink", "ins", "del", "smartTag"):
+            nested = _docx_element_text(child)
+            if nested:
+                parts.append(nested)
+        # 其它（pPr/bookmarkStart/proofErr/idmap 等）忽略
+    return "".join(parts)
+
+
 def _extract_docx(file_path: Path) -> str:
-    """python-docx 提取 DOCX 纯文本（段落 + 表格）。"""
+    """lxml 遍历 DOCX 正文 XML 提取文本；OMML 公式转 LaTeX（保留公式）。
+
+    相比 python-docx 的 para.text（丢弃公式），此实现按 w:p / w:tbl 顺序
+    输出段落与表格文本，并让 Word 公式进入可检索/可渲染的文本流。
+    """
     import docx  # type: ignore[import-not-found]
 
-    parts: list[str] = []
     doc = docx.Document(str(file_path))
-    for para in doc.paragraphs:
-        txt = para.text.strip()
-        if txt:
-            parts.append(txt)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                txt = cell.text.strip()
+    parts: list[str] = []
+    body = doc.element.body
+
+    def _cell_text(tc) -> str:
+        lines: list[str] = []
+        for p in tc.iterchildren():
+            if _qn(p.tag) == "p":
+                txt = _docx_element_text(p).strip()
                 if txt:
-                    parts.append(txt)
+                    lines.append(txt)
+        return "<br>".join(lines)
+
+    for block in body.iterchildren():
+        name = _qn(block.tag)
+        if name == "p":
+            txt = _docx_element_text(block).strip()
+            if txt:
+                parts.append(txt)
+        elif name == "tbl":  # 表格：每行 | 分隔拼成文本
+            for row in block.iterchildren():
+                if _qn(row.tag) != "tr":
+                    continue
+                cells = [
+                    _cell_text(tc).strip()
+                    for tc in row.iterchildren()
+                    if _qn(tc.tag) == "tc"
+                ]
+                if cells and any(cells):
+                    parts.append(" | ".join(cells))
     return "\n".join(parts).strip()
 
 
@@ -274,6 +435,11 @@ def run_indexing(db: Session, material_id: int) -> None:
         chunks = chunk_text(content or "")
         # 清空旧分块（重索引用）
         db.query(MaterialChunk).filter(MaterialChunk.material_id == material_id).delete()
+        # 并发删除竞态防护：解析期间材料可能已被删除，此时不做任何写入，
+        # 避免为已删除材料重建孤立的 content/chunk 行
+        if db.get(Material, material_id) is None:
+            db.rollback()
+            return
 
         indexed = True
         for idx, chunk in enumerate(chunks, start=1):
@@ -307,6 +473,10 @@ def _persist_index_result(
 ) -> None:
     """写入 MaterialContent 解析结果（覆盖已有记录）。"""
     from datetime import datetime, timezone
+
+    # 并发删除竞态防护：材料已被删除则不落任何 content 行
+    if db.get(Material, material_id) is None:
+        return
 
     existing = (
         db.query(MaterialContent)

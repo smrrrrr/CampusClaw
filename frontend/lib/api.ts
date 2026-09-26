@@ -271,6 +271,12 @@ export const api = {
       { method: "POST" },
     ),
 
+  deleteMaterial: (materialId: number) =>
+    apiRequest<{ id: number; message: string }>(
+      `/api/teacher/materials/${materialId}`,
+      { method: "DELETE" },
+    ),
+
   materialDownloadUrl: (materialId: number) => `/api/materials/${materialId}/download`,
   materialPreviewUrl: (materialId: number) => `/api/materials/${materialId}/preview`,
 };
