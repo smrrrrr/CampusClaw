@@ -1,14 +1,15 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { AuthGate } from "@/components/auth-guard";
+import { AppShell, TEACHER_NAV } from "@/components/app-layout";
 import { ClassSelector } from "@/components/class-selector";
 import { LogoutButton } from "@/components/logout-button";
 import { api, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 
-const ACCEPT = ".pdf,.pptx,.docx,.jpg,.png";
+const ACCEPT = ".pdf,.pptx,.docx,.jpg,.png,.md,.txt";
 
 function UploadHome() {
   const teachingClasses = useAuthStore((s) => s.teachingClasses);
@@ -81,18 +82,30 @@ function UploadHome() {
     }
   };
 
+  const router = useRouter();
+
+  const handleNav = (key: string) => {
+    const found =
+      TEACHER_NAV.find((n) => n.key === key) ||
+      TEACHER_NAV.flatMap((n) => n.children ?? []).find((c) => c.key === key);
+    if (found && found.to !== "/teacher/upload") router.push(found.to!);
+  };
+
   return (
-    <>
-      <div className="topbar">
-        <strong className="brand">CampusClaw 教师端</strong>
-        <div className="actions">
-          <Link href="/teacher" className="btn" style={{ width: "auto", padding: "8px 16px", textDecoration: "none" }}>
-            返回工作台
-          </Link>
+    <AppShell
+      brandMark="T"
+      subtitle="智能教学平台 · 教师端"
+      navItems={TEACHER_NAV}
+      active="upload"
+      onNavigate={handleNav}
+      headerRight={
+        <>
+          <button className="hdr-btn" onClick={() => router.push("/teacher")}>返回工作台</button>
           <LogoutButton />
-        </div>
-      </div>
-      <div className="content">
+        </>
+      }
+    >
+      <div className="content" style={{ padding: 0, maxWidth: "none" }}>
         <h2 style={{ marginBottom: 16 }}>上传学习资料</h2>
 
         {!hasClasses ? (
@@ -118,7 +131,7 @@ function UploadHome() {
                 style={{ width: "100%" }}
               />
               <p className="hint" style={{ marginTop: 4, fontSize: 12 }}>
-                允许格式：PDF / PPTX / DOCX / JPG / PNG，单文件 ≤ 50MB
+                允许格式：PDF / PPTX / DOCX / JPG / PNG / MD / TXT，单文件 ≤ 50MB
               </p>
             </div>
 
@@ -148,7 +161,7 @@ function UploadHome() {
               <div style={{ marginBottom: 16 }}>
                 <div className="hint" style={{ marginBottom: 4 }}>上传进度：{progress}%</div>
                 <div style={{ background: "#e5e7eb", borderRadius: 4, height: 8, overflow: "hidden" }}>
-                  <div style={{ width: `${progress}%`, background: "#9d2f3b", height: "100%", transition: "width 0.2s" }} />
+                  <div style={{ width: `${progress}%`, background: "var(--brand)", height: "100%", transition: "width 0.2s" }} />
                 </div>
               </div>
             )}
@@ -183,7 +196,7 @@ function UploadHome() {
           </div>
         )}
       </div>
-    </>
+    </AppShell>
   );
 }
 

@@ -85,6 +85,9 @@ class RefreshResponse(BaseModel):
     must_change_password: bool
     role: str
     teaching_classes: list[int] | None = None
+    user: UserInfo
+    is_phone_login: bool = False
+    can_switch_student: bool = False
 
 
 class MessageResponse(BaseModel):

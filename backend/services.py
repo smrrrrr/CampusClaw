@@ -175,7 +175,7 @@ def write_audit_log(
 # AI 提问次数限制：每日 20 次，按 student_id 计数，跨日重置
 # ---------------------------------------------------------------------------
 
-AI_DAILY_LIMIT = 20
+AI_DAILY_LIMIT = 40
 
 
 def get_ai_daily_count(db: Session, student_id: int) -> int:

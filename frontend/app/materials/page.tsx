@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthGate } from "@/components/auth-guard";
+import { AppShell, TEACHER_NAV } from "@/components/app-layout";
 import { ClassSelector } from "@/components/class-selector";
 import { LogoutButton } from "@/components/logout-button";
 import { SwitchChildButton } from "@/components/switch-child";
@@ -74,6 +75,7 @@ function MaterialsHome() {
 
   const isImage = (mime: string) => mime.startsWith("image/");
   const isPdf = (mime: string) => mime === "application/pdf";
+  const isText = (mime: string) => mime === "text/markdown" || mime === "text/plain";
 
   const downloadFile = (item: MaterialItemDTO) => {
     const token = useAuthStore.getState().accessToken;
@@ -112,32 +114,46 @@ function MaterialsHome() {
     }
   };
 
+  const router = useRouter();
+
+  const nav = isTeacher
+    ? TEACHER_NAV
+    : [
+        { key: "home", label: "首页", icon: "chat", to: "/student" },
+        { key: "materials", label: "学习资料", icon: "doc" },
+      ];
+  const handleNav = (key: string) => {
+    const found =
+      nav.find((n) => n.key === key) ||
+      nav.flatMap((n) => n.children ?? []).find((c) => c.key === key);
+    if (found?.to) router.push(found.to);
+  };
+
   return (
-    <>
-      <div className="topbar">
-        <strong className="brand">CampusClaw {isTeacher ? "教师端" : "学生端"}</strong>
-        <div className="actions">
+    <AppShell
+      brandMark={isTeacher ? "T" : "S"}
+      subtitle={isTeacher ? "智能教学平台 · 教师端" : "学习平台 · 学生端"}
+      navItems={nav}
+      active="materials"
+      onNavigate={handleNav}
+      headerRight={
+        <>
           {isTeacher ? (
             <>
-              <Link href="/teacher" className="btn" style={{ width: "auto", padding: "8px 16px", textDecoration: "none" }}>
-                工作台
-              </Link>
-              <Link href="/teacher/upload" className="btn" style={{ width: "auto", padding: "8px 16px", textDecoration: "none" }}>
-                上传资料
-              </Link>
+              <button className="hdr-btn" onClick={() => router.push("/teacher")}>工作台</button>
+              <button className="hdr-btn" onClick={() => router.push("/teacher/upload")}>上传资料</button>
             </>
           ) : (
             <>
-              <Link href="/student" className="btn" style={{ width: "auto", padding: "8px 16px", textDecoration: "none" }}>
-                首页
-              </Link>
+              <button className="hdr-btn" onClick={() => router.push("/student")}>首页</button>
               <SwitchChildButton />
             </>
           )}
           <LogoutButton />
-        </div>
-      </div>
-      <div className="content">
+        </>
+      }
+    >
+      <div className="content" style={{ padding: 0, maxWidth: "none" }}>
         <h2 style={{ marginBottom: 16 }}>学习资料</h2>
 
         {!hasClasses ? (
@@ -208,7 +224,7 @@ function MaterialsHome() {
                         )}
                       </td>
                       <td style={{ padding: "8px 4px", whiteSpace: "nowrap" }}>
-                        {(isPdf(item.file_type) || isImage(item.file_type)) && (
+                        {(isPdf(item.file_type) || isImage(item.file_type) || isText(item.file_type)) && (
                           <button
                             className="btn"
                             style={{ width: "auto", padding: "4px 10px", fontSize: 13, marginRight: 4 }}
@@ -257,7 +273,7 @@ function MaterialsHome() {
           onClose={() => setPreviewItem(null)}
         />
       )}
-    </>
+    </AppShell>
   );
 }
 

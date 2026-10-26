@@ -67,3 +67,13 @@
 - [x] 9.3 实现成功删除审计日志（异步），验证删除动作被记录
 - [x] 9.4 前端材料列表仅对 role=teacher 展示删除按钮，点击前 confirm 确认，删除成功后本地移除条目并刷新；验证学生无删除入口
 - [x] 9.5 端到端验证：教师删除任教班级资料 → 记录/内容/分块/物理文件全部移除 → 列表/下载/预览返回 404、AI 检索不再召回；验证删除后不可访问
+
+## 10. 支持 MD/TXT 格式
+
+- [ ] 10.1 后端允许 md/markdown/txt 扩展名（_EXT_TO_MIME + config.allowed_extensions + .env.example），MD/TXT 无 magic number，用「UTF-8 可解码且无 NUL 字节」校验真实性（looks_like_utf8_text），拦截二进制伪装文本；验证 validate_upload_file 对合法 .md/.txt 放行、对含 NUL 的伪装 .txt 返回 400
+- [ ] 10.2 parse_material_text 增加 text/markdown 与 text/plain 分支直接读取 UTF-8 文本（兼容 BOM），支持含 LaTeX 公式的 Markdown 进入 AI 检索；验证解析结果正确
+- [ ] 10.3 前端 accept 增加 .md/.txt，material-preview 识别 text/markdown、text/plain，按纯文本拉取并用 MarkdownAnswer（react-markdown + KaTeX）渲染，使含公式的讲义以数学符号预览；验证 MD/TXT 在线预览公式与排版正常
+
+## 11. PDF 公式降级策略
+
+- [ ] 11.1 明确 PDF 公式解析定位为「降级」：不引入重依赖。PDF 仅尽力抽取可选文字；当整份 PDF 可提取文字少于阈值（PDF_MIN_TEXT_CHARS）时判定为公式/扫描图片为主的 PDF，标记 is_indexed=false 并提示「建议改传含公式的 Markdown(.md) 或纯文本(.txt)」，避免近空文本入库导致 AI 检索无依据；验证混合型 PDF 提取可用文字入库、纯图片 PDF 返回友好提示

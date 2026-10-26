@@ -5,7 +5,7 @@ CampusClaw 的登录体系、RBAC 角色权限和班级数据隔离规约已为�
 ## What Changes
 
 - 引入教师上传权限控制：仅教师可上传资料，学生（含家长代登录）仅具备查看和下载权限，前端无上传入口。
-- 引入文件类型与大小限制：允许 PDF/PPTX/DOCX/JPG/PNG，单文件上限 50MB，前端 accept 属性初步限制，后端校验真实 MIME 类型和文件大小，不合规返回 400。
+- 引入文件类型与大小限制：允许 PDF/PPTX/DOCX/JPG/PNG/MD/TXT，单文件上限 50MB，前端 accept 属性初步限制，后端校验真实 MIME 类型和文件大小，不合规返回 400。
 - 引入上传元数据与班级选择：前端提供班级选择器（从 teaching_classes 读取），上传附带元数据（文件名、class_id、上传者 user_id、上传时间、描述/标签、file_path），后端校验 class_id 在 teaching_classes 范围内。
 - 引入文件存储策略：SQLite 仅存储元数据（Material 表），文件本体存储在 Docker 挂载卷 /app/uploads/，docker-compose.yml 明确挂载 ./uploads:/app/uploads。
 - 引入文件重名与异常处理：同名文件自动重命名（时间戳前缀），DB 写入失败时回滚删除物理文件，网络中断前端提供重试，后端文件头校验防恶意文件。

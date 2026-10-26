@@ -30,7 +30,7 @@
 
 ### Requirement: 文件类型与大小限制
 
-系统 MUST 仅允许以下文件格式：PDF、PPTX、DOCX、JPG、PNG。单文件大小上限 MUST 为 50MB。前端 MUST 通过 accept 属性做初步限制。后端 MUST 校验真实的 MIME 类型（不信任文件扩展名）和文件大小，不合规 MUST 返回 400 Bad Request。
+系统 MUST 仅允许以下文件格式：PDF、PPTX、DOCX、JPG、PNG、MD、TXT。单文件大小上限 MUST 为 50MB。前端 MUST 通过 accept 属性做初步限制。后端 MUST 校验真实的 MIME 类型（不信任文件扩展名）和文件大小，不合规 MUST 返回 400 Bad Request。MD/TXT 为纯文本、无 magic number，后端 MUST 以「内容可解码为 UTF-8 且不含 NUL 字节」判定真实性，拦截二进制文件伪装成文本。
 
 #### Scenario: 上传允许格式的文件成功
 
@@ -55,7 +55,7 @@
 #### Scenario: 前端 accept 属性初步限制
 
 - **WHEN** 教师在文件选择器中选择文件
-- **THEN** 前端 accept 属性仅显示 PDF/PPTX/DOCX/JPG/PNG 格式的文件，其他格式不可选
+- **THEN** 前端 accept 属性仅显示 PDF/PPTX/DOCX/JPG/PNG/MD/TXT 格式的文件，其他格式不可选
 
 ### Requirement: 上传元数据与班级选择
 
@@ -179,7 +179,7 @@
 
 ### Requirement: 下载与预览
 
-前端 MUST 支持点击在线预览（PDF/图片）或下载材料。下载接口 MUST 校验当前用户的 class_id（学生）或 teaching_classes（教师）是否与材料的 class_id 匹配，不匹配 MUST 返回 403 Forbidden。
+前端 MUST 支持点击在线预览（PDF/图片/Markdown/纯文本）或下载材料。PNG/JPG 以图片渲染、PDF 以 iframe 渲染、MD/TXT 以纯文本拉取并用 MarkdownAnswer（react-markdown + KaTeX）渲染，使含 LaTeX 公式的讲义以数学符号展示；PPTX/DOCX 暂不支持预览并提示下载查看。下载接口 MUST 校验当前用户的 class_id（学生）或 teaching_classes（教师）是否与材料的 class_id 匹配，不匹配 MUST 返回 403 Forbidden。
 
 #### Scenario: 学生在线预览 PDF 成功
 

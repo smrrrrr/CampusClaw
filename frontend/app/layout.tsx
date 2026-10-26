@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SessionProvider } from "@/components/session-provider";
 import "./globals.css";
 // KaTeX 数学公式样式（AI 解题助手渲染 LaTeX 用）
 import "katex/dist/katex.min.css";
@@ -15,7 +16,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body><SessionProvider>{children}</SessionProvider></body>
     </html>
   );
 }

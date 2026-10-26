@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import codecs
 import io
 import time
 import zipfile
@@ -28,7 +29,13 @@ _EXT_TO_MIME: dict[str, str] = {
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",
     "png": "image/png",
+    "md": "text/markdown",
+    "markdown": "text/markdown",
+    "txt": "text/plain",
 }
+
+# 纯文本类扩展名（无 magic number，靠 UTF-8 可解码 + 无 NUL 字节判定）
+_TEXT_EXTS: set[str] = {"md", "markdown", "txt"}
 
 # magic number → 通用类别（不信任扩展名，以文件头为准）
 _MAGIC_PATTERNS: list[tuple[bytes, str]] = [
@@ -39,6 +46,10 @@ _MAGIC_PATTERNS: list[tuple[bytes, str]] = [
 ]
 
 MAX_FILE_SIZE = settings.max_file_size_mb * 1024 * 1024  # 50MB
+
+# PDF 降级策略：可提取文字过少（主要靠公式/扫描图片排布）时视为无法可靠
+# 解析，标记未索引并提示改用 MD/TXT，避免把近空/残缺文本入库导致 AI 检索无依据。
+PDF_MIN_TEXT_CHARS = 50
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +84,25 @@ def detect_office_mime(file_bytes: bytes) -> str | None:
     return None
 
 
+def looks_like_utf8_text(data: bytes) -> bool:
+    """判定是否为合法 UTF-8 纯文本：可解码且不含 NUL 字节。
+
+    MD/TXT 无法用 magic number 判断，故用该检查做真实性校验，
+    拦截二进制/可执行文件伪装成文本的场景。
+    """
+    if not data:
+        return False
+    if b"\x00" in data:
+        return False
+    # 去除 UTF-8 BOM 后整体可解码
+    body = data[3:] if data.startswith(codecs.BOM_UTF8) else data
+    try:
+        body.decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
 def validate_upload_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
     """校验文件大小 + magic number + MIME，返回 (mime_type, ext)。
 
@@ -90,6 +120,12 @@ def validate_upload_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
     ext = get_file_ext(filename)
     if ext not in _EXT_TO_MIME:
         raise ValueError(f"不支持的文件格式：{ext or '无扩展名'}，仅允许 {settings.allowed_extensions}")
+
+    # 纯文本（MD/TXT）：无 magic number，改用 UTF-8 可解码 + 无 NUL 判定真实性
+    if ext in _TEXT_EXTS:
+        if not looks_like_utf8_text(file_bytes):
+            raise ValueError("文件内容不是合法 UTF-8 文本（或含二进制字节），疑似伪装扩展名")
+        return _EXT_TO_MIME[ext], ext
 
     head = file_bytes[:16]
     category = detect_category(head)
@@ -393,13 +429,24 @@ def parse_material_text(file_path: Path, file_type: str) -> tuple[str | None, st
     try:
         if file_type == "application/pdf":
             text = _extract_pdf(file_path)
-            return text or "", None
+            if not text or len(text.strip()) < PDF_MIN_TEXT_CHARS:
+                return (
+                    None,
+                    "该 PDF 文字内容过少，公式/主要内容以图片形式内嵌，无法可靠提取；"
+                    "建议改传含公式的 Markdown(.md) 或纯文本(.txt) 讲义以获得正确的公式显示",
+                )
+            return text, None
         if file_type == _EXT_TO_MIME["pptx"]:
             text = _extract_pptx(file_path)
             return text or "", None
         if file_type == _EXT_TO_MIME["docx"]:
             text = _extract_docx(file_path)
             return text or "", None
+        if file_type in ("text/markdown", "text/plain"):
+            # MD/TXT 直接读文本（含公式的 Markdown 可被前端 KaTeX 渲染）
+            raw = file_path.read_bytes()
+            body = raw[3:] if raw.startswith(codecs.BOM_UTF8) else raw
+            return body.decode("utf-8", errors="replace"), None
         if file_type in ("image/jpeg", "image/png"):
             # 图片无文本提取，后续可接入 OCR
             return "", None

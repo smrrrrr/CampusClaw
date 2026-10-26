@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
  * 路由级权限拦截（middleware.ts）：
  * - /teacher/* 仅 role=teacher 可访问
  * - /student/* 仅 role=student 可访问
- * - 未登录重定向到 /login
+ * - Cookie 提示缺失时由客户端恢复会话后判断是否登录
  * - 越权重定向到 /403
  *
  * 注意：Access Token 仅存于客户端内存（Zustand），middleware 无法读取。
@@ -28,9 +28,10 @@ export function middleware(req: NextRequest) {
   const role = req.cookies.get("cc_role")?.value;
   const hasToken = req.cookies.get("cc_has_token")?.value === "1";
 
-  // 未登录 → /login
+  // 辅助 Cookie 不是认证凭证。缺失时仍需让客户端尝试 HttpOnly Cookie 恢复，
+  // 不能在会话恢复之前直接跳转登录页。
   if (!hasToken) {
-    return NextResponse.redirect(new URL("/login", req.url));
+    return NextResponse.next();
   }
 
   // 角色校验

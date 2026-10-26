@@ -1,52 +1,129 @@
-"""文本分块服务（design.md 决策 1）。
+"""文本分块服务（design.md 决策 1，本地优化版）。
 
-按固定长度 + 重叠的滑动窗口将整份纯文本切分为带序号的文本块。
-优先在换行 / 段落边界对齐；无自然边界时按字符硬切。
+为避免定长滑动窗口把"概念标题 + 公式"从中间劈开（如"向量夹角公式"
+的标题落在上一块、公式体却落到下一块，严重稀释检索信噪比），改为：
+
+1. 先把整份文本按**语义锚点**切成逻辑段（segment）：
+   - Markdown 标题（`##` / `### …`）
+   - 加粗子标签行（`**向量夹角公式**：`、`**线面角公式**：` 等定义/公式入口）
+   这样每个公式、每条定义都尽量自成一段，作为独立可检索单元。
+
+2. 段长 ≤ chunk_size 时整段保留；超长的段再按空白行（段落）贪婪合并，
+   用 overlap 保持上下文连续，避免单段被硬性切割。
+
+零外部依赖、纯文本层处理，无需分词。
 """
 
 from __future__ import annotations
 
+import re
+
 from config import settings
+
+
+def _is_segment_anchor(line: str) -> bool:
+    """判断某行是否为"新逻辑段"锚点（标题或加粗子标签）。"""
+    s = line.strip()
+    # 去掉列表前缀（`* ` / `- ` / `• ` 等），便于识别行内槽点
+    s = re.sub(r"^[*+•\-]\s+", "", s)
+    if not s:
+        return False
+    if re.match(r"^#{1,6}\s", s):
+        return True
+    # 加粗子标签：**xxx** 后紧跟[： :]或换行，如 **向量夹角公式**：
+    if re.match(r"\*\*[^*\n]{1,40}\*\*\s*[：:]\s*$", s):
+        return True
+    return False
+
+
+def _split_segments(text: str) -> list[str]:
+    """按语义锚点切成逻辑段，锚点行归属新段开头。"""
+    lines = text.split("\n")
+    segments: list[str] = []
+    cur: list[str] = []
+    for ln in lines:
+        if cur and _is_segment_anchor(ln):
+            segments.append("\n".join(cur))
+            cur = [ln]
+        else:
+            cur.append(ln)
+    if cur:
+        segments.append("\n".join(cur))
+    return [s.strip() for s in segments if s.strip()]
+
+
+def _split_paragraphs(segment: str) -> list[str]:
+    """将单个逻辑段按空白行分裂为段落块（保留公式完整性）。"""
+    return [p.strip() for p in re.split(r"\n\s*\n", segment) if p.strip()]
+
+
+def _greedy_merge(paras: list[str], chunk_size: int, overlap: int) -> list[str]:
+    """贪心合并段落为 ≤ chunk_size 的块，块间带 overlap 保持连续。"""
+    if not paras:
+        return []
+    chunks: list[str] = []
+    cur = ""
+    for p in paras:
+        if not cur:
+            cur = p
+        elif len(cur) + 1 + len(p) <= chunk_size:
+            cur = cur + "\n" + p
+        else:
+            chunks.append(cur)
+            # 携带上一块尾部 overlap 字符，保证概念衔接不被硬断
+            cur = cur[-overlap:] + "\n" + p if overlap > 0 else p
+    if cur.strip():
+        chunks.append(cur)
+    return chunks
+
+
+def _hard_split(s: str, chunk_size: int, overlap: int) -> list[str]:
+    """兜底：单段超长时按字符滑动切分（尽量避开公式定界符）。"""
+    if len(s) <= chunk_size:
+        return [s]
+    step = max(1, chunk_size - overlap)
+    out: list[str] = []
+    start = 0
+    n = len(s)
+    while start < n:
+        end = min(start + chunk_size, n)
+        if end < n:
+            # 优先对齐换行；再尝试对齐空格；都不行则硬切
+            nl = s.rfind("\n", start, end)
+            if nl > start + chunk_size // 2:
+                end = nl + 1
+            else:
+                sp = s.rfind(" ", start, end)
+                if sp > start + chunk_size // 2:
+                    end = sp
+        out.append(s[start:end].strip())
+        if end == start:
+            break
+        start = max(start + step, end - overlap) if overlap else end
+        if start >= n:
+            break
+    return [c for c in out if c]
 
 
 def _split_text_chunks(
     text: str, chunk_size: int, overlap: int
 ) -> list[str]:
-    """将文本切分为 list 文本块（不编号，编号由调用方分配）。
-
-    - 空文本 → 返回空列表（调用方决定是否跳过索引）
-    - 单块：text 长度 ≤ chunk_size → 1 块
-    - 多块：滑动窗口，每步前进 (chunk_size - overlap)
-    """
+    """将文本切分为 list 文本块（不编号，编号由调用方分配）。"""
     text = text.strip()
     if not text:
         return []
 
-    if len(text) <= chunk_size:
-        return [text]
-
-    step = max(1, chunk_size - overlap)
     chunks: list[str] = []
-    start = 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-
-        # 边界对齐：若非最后一段且当前 slice 尾部处于句子/段落中间，
-        # 尽量前移 end 到最近换行或空格，避免割裂语义。
-        if end < len(text):
-            window = text[start:end]
-            # 优先对齐换行
-            nl = window.rfind("\n")
-            if nl > chunk_size // 2:
-                end = start + nl + 1
-            else:
-                sp = window.rfind(" ", chunk_size // 2)
-                if sp != -1:
-                    end = start + sp
-
-        chunks.append(text[start:end])
-        start = start + step
-
+    for segment in _split_segments(text):
+        if len(segment) <= chunk_size:
+            chunks.append(segment)
+            continue
+        paras = _split_paragraphs(segment)
+        if len(paras) <= 1:
+            massive = _hard_split(segment, chunk_size, overlap)
+            chunks.extend(massive)
+        else:
+            chunks.extend(_greedy_merge(paras, chunk_size, overlap))
     return chunks
 
 

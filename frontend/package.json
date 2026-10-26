@@ -3,20 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test": "node --test tests/*.test.cjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
+    "katex": "0.16.32",
     "next": "14.2.15",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "zustand": "4.5.5",
-    "katex": "0.16.11",
     "react-markdown": "9.0.1",
     "rehype-katex": "7.0.1",
-    "remark-math": "6.0.0"
+    "remark-math": "6.0.0",
+    "zustand": "4.5.5"
   },
   "devDependencies": {
     "@types/node": "20.14.0",

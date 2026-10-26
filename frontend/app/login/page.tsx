@@ -42,8 +42,10 @@ export default function LoginPage() {
   // 已登录用户访问登录页 → 按角色跳走
   useEffect(() => {
     if (accessToken) {
-      const role = useAuthStore.getState().userRole;
-      router.replace(role === "teacher" ? "/teacher" : "/student");
+      const { userRole, mustChangePassword, isPhoneLogin } = useAuthStore.getState();
+      router.replace(mustChangePassword && !isPhoneLogin
+        ? "/change-password"
+        : userRole === "teacher" ? "/teacher" : "/student");
     }
   }, [accessToken, router]);
 
@@ -118,7 +120,7 @@ export default function LoginPage() {
   return (
     <div className="centered">
       <div className="card">
-        <h1 style={{ color: "#7e202b" }}>CampusClaw 校园助手</h1>
+        <h1 style={{ color: "var(--brand)" }}>CampusClaw 校园助手</h1>
 
         <div className="tabs">
           <button

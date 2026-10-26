@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useAuthStore } from "@/lib/store";
 
 /**
@@ -13,11 +13,17 @@ import { useAuthStore } from "@/lib/store";
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [ready, setReady] = useState(false);
 
   const accessToken = useAuthStore((s) => s.accessToken);
   const mustChangePassword = useAuthStore((s) => s.mustChangePassword);
   const isPhoneLogin = useAuthStore((s) => s.isPhoneLogin);
+  const userRole = useAuthStore((s) => s.userRole);
+  const wrongRole =
+    ((pathname === "/teacher" || pathname.startsWith("/teacher/")) && userRole !== "teacher") ||
+    ((pathname === "/student" || pathname.startsWith("/student/")) && userRole !== "student");
+  const needsPasswordChange = mustChangePassword && !isPhoneLogin;
+  const ready = !!accessToken && !wrongRole &&
+    (pathname === "/change-password" ? needsPasswordChange : !needsPasswordChange);
 
   useEffect(() => {
     if (!accessToken) {
@@ -35,8 +41,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       router.replace("/");
       return;
     }
-    setReady(true);
-  }, [accessToken, mustChangePassword, isPhoneLogin, pathname, router]);
+    if (wrongRole) router.replace("/403");
+  }, [accessToken, mustChangePassword, isPhoneLogin, pathname, router, wrongRole]);
 
   if (!ready) {
     return <div className="centered">加载中…</div>;

@@ -145,6 +145,163 @@ class AIQuestionLog(Base):
     )
 
 
+class AgentConfig(Base):
+    """AI 解题助手的班级级配置：可自定义系统提示词与「解题引导」技能开关。
+
+    教师按任教班级配置（class_id 唯一），学生提问时按所在班级读取该配置；
+    无配置行则使用 llm_service 内置默认提示词。
+    """
+
+    __tablename__ = "agent_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    class_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("classes.id"), nullable=False, unique=True
+    )
+    # 最近一次编辑配置的教师
+    teacher_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False
+    )
+    # 可自定义的系统提示词；留空则使用默认提示词
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 「解题引导技能」开关：开启后 AI 只给思路引导、不直接给最终答案，引导学生自己算出
+    tutor_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class Conversation(Base):
+    """AI 解题助手多轮会话（按学生 + 班级隔离）。
+
+    学生可新建多个会话，同一会话内连续追问；会话连同其 Message 构成多轮上下文。
+    """
+
+    __tablename__ = "conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False
+    )
+    # 会话所在班级（隔离 + 读取对应班级的 AgentConfig）
+    class_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("classes.id"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(128), default="新对话", nullable=False)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("ai_applications.id"), nullable=True)
+    # 首轮检索到的班级资料上下文（整段文本）；后续轮次复用，避免重复检索。
+    # 注意：SQLite 建表时此列可能缺失，需 database.run_simple_migrations 增列。
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_conversation_student", "student_id", "updated_at"),
+        Index("ix_conversation_class_id", "class_id"),
+    )
+
+
+class Message(Base):
+    """会话内的单条消息（role: user / assistant）。
+
+    content 存消息文本；assistant 消息可用 sources（JSON）记录溯源引用。
+    """
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)  # user / assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # 溯源引用 JSON 数组（assistant）；user 消息为空
+    sources: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_calls: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (Index("ix_message_conversation", "conversation_id", "id"),)
+
+
+class AIApplication(Base):
+    __tablename__ = "ai_applications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), index=True)
+    subject: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(128))
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
+    tutor_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # null = 本班全部；[] = 不绑定；其他 = 显式绑定的 ID 列表。
+    material_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skill_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+    __table_args__ = (UniqueConstraint("class_id", "subject", name="uq_application_class_subject"),)
+
+
+class PromptTemplate(Base):
+    __tablename__ = "prompt_templates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    content: Mapped[str] = mapped_column(Text)
+
+
+class InvocationAudit(Base):
+    __tablename__ = "invocation_audits"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trace_id: Mapped[str] = mapped_column(String(64), index=True)
+    class_id: Mapped[int] = mapped_column(Integer, index=True)
+    user_id: Mapped[int] = mapped_column(Integer)
+    conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    application_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    phase: Mapped[str] = mapped_column(String(64))
+    endpoint: Mapped[str] = mapped_column(Text, default="")
+    request_json: Mapped[str] = mapped_column(Text)
+    response_json: Mapped[str] = mapped_column(Text)
+    context_json: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32))
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class MCPServer(Base):
+    __tablename__ = "mcp_servers"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    base_url: Mapped[str] = mapped_column(String(512))
+    connected: Mapped[bool] = mapped_column(Boolean, default=False)
+    tools_cache: Mapped[str] = mapped_column(Text, default="[]")
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    __table_args__ = (UniqueConstraint("class_id", "name", name="uq_mcp_class_name"),)
+
+
+class AgentSkill(Base):
+    __tablename__ = "agent_skills"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    content: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class ToolCallAudit(Base):
+    __tablename__ = "tool_call_audits"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    conversation_id: Mapped[int] = mapped_column(Integer)
+    skill_id: Mapped[int] = mapped_column(Integer)
+    tool_ref: Mapped[str] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(16))
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 # ---------------------------------------------------------------------------
 # 班级数据隔离骨架表（class_id 字段规范，业务字段由后续规约扩展）
 # ---------------------------------------------------------------------------

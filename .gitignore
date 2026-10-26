@@ -17,6 +17,8 @@ backend/uploads/
 frontend/uploads/
 # 任意后缀的数据库文件
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 
@@ -34,7 +36,17 @@ __pycache__/
 .venv/
 venv/
 .uv/
+.uv-cache/
+*.tsbuildinfo
 .pytest_cache/
+
+# ---- 自动化测试报告（不入库）----
+apitest/reports/
+apitest/**/report.html
+reports/
+# 本地交付报告、截图和真实调用证据不随代码发布
+/output/
+/tmp/
 
 # ---- 日志与本地临时文件 ----
 *.log

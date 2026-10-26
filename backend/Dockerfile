@@ -11,14 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # 先拷依赖清单以利用 Docker 层缓存
-COPY pyproject.toml ./
-RUN uv sync --no-dev
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev
 
 # 拷业务代码
 COPY . .
 
 # 上传目录（与 docker-compose 卷挂载一致）
-RUN mkdir -p /app/uploads
+RUN mkdir -p /app/uploads && /app/.venv/bin/python -c "import main"
 ENV UPLOAD_DIR=/app/uploads
 
 EXPOSE 8000

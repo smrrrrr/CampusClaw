@@ -39,13 +39,20 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     max_file_size_mb: int = 50
     # 允许的文件格式（MIME → 扩展名映射，用于前端 accept 与后端校验）
-    allowed_extensions: str = "pdf,pptx,docx,jpg,png"
+    allowed_extensions: str = "pdf,pptx,docx,jpg,png,md,txt"
 
     # RAG 检索（add-rag-search）
-    chunk_size: int = 500          # 文本分块长度（字符）
-    chunk_overlap: int = 100       # 相邻分块重叠长度（字符）
-    chunk_top_k: int = 12           # 相似度检索返回的分块数（提高后可覆盖更多相关材料）
+    chunk_size: int = 300          # 文本分块长度（字符）
+    chunk_overlap: int = 60        # 相邻分块重叠长度（字符）
+    chunk_top_k: int = 3           # 相似度检索返回的分块数（资料 2-3 条即可）
+    # 相关度下限比例：低于最优命中分数 × 该比例的块视为低相关剔除，避免硬凑条数
+    chunk_min_relevance: float = 0.35
+    # 绝对词元门槛：问题与所有候选块精确字符二元组重叠的最大次数低于该值，
+    # 视为「本班未找到相关资料」，不返回任何引用（避免无关问题被虚假余弦召回并误标出处）
+    chunk_min_keyword_hits: int = 3
     embed_dim: int = 512           # 字符 n-gram 哈希向量维度
+    # 检索模式：vector（仅向量） / keyword（仅关键字） / hybrid（关键字+向量 RRF 融合）
+    retrieval_mode: str = "hybrid"
 
     # AI 解题助手：DeepSeek 生成（openai 兼容接口）
     deepseek_api_key: str = ""               # 为空则 AI 生成降级为提示
@@ -53,6 +60,11 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     deepseek_timeout: float = 60             # 单次请求超时（秒）
     deepseek_temperature: float = 0.3        # 偏低以贴合资料、减少编造
+
+    # MCP 凭证只留在服务端；地址明确允许，禁止任意 URL 和重定向。
+    mcp_auth_token: str = ""
+    mcp_allowed_base_urls: str = "http://mcp-server:8090,http://127.0.0.1:8090,http://localhost:8090"
+    mcp_timeout: float = 30
 
     @property
     def frontend_origin_list(self) -> list[str]:

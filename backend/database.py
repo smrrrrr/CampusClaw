@@ -46,6 +46,27 @@ def run_simple_migrations() -> None:
             conn.execute(text("DROP TABLE IF EXISTS materials"))
             conn.commit()
 
+        # conversations 表若为旧结构（缺 context 列）则 ALTER 增列
+        tinfo = conn.execute(text("PRAGMA table_info(conversations)")).fetchall()
+        if tinfo:
+            cols = {row[1] for row in tinfo}
+            if "context" not in cols:
+                conn.execute(text("ALTER TABLE conversations ADD COLUMN context TEXT"))
+                conn.commit()
+            if "application_id" not in cols:
+                conn.execute(text("ALTER TABLE conversations ADD COLUMN application_id INTEGER REFERENCES ai_applications(id)"))
+                conn.commit()
+
+        message_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(messages)"))}
+        if message_cols and "tool_calls" not in message_cols:
+            conn.execute(text("ALTER TABLE messages ADD COLUMN tool_calls TEXT"))
+            conn.commit()
+
+        server_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(mcp_servers)"))}
+        if server_cols and "revision" not in server_cols:
+            conn.execute(text("ALTER TABLE mcp_servers ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"))
+            conn.commit()
+
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record):

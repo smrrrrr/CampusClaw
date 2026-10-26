@@ -78,7 +78,7 @@ def _parse_teaching_classes(raw: str | None) -> list[int] | None:
         return None
 
 
-def _issue_tokens(response: Response, user: User) -> str:
+def _issue_tokens(response: Response, user: User, *, is_phone_login: bool = False) -> str:
     """签发 Access Token（返回）+ Refresh Token（写入 HttpOnly Cookie）。"""
     tc = _parse_teaching_classes(user.teaching_classes)
     access_token = create_access_token(
@@ -95,6 +95,7 @@ def _issue_tokens(response: Response, user: User) -> str:
         must_change_password=user.must_change_password,
         phone=user.phone,
         teaching_classes=tc,
+        is_phone_login=is_phone_login,
     )
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
@@ -177,36 +178,21 @@ def refresh_token(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号不存在")
 
-    access_token = create_access_token(
-        user_id=user.id,
-        role=user.role.value,
-        class_id=user.class_id,
-        must_change_password=user.must_change_password,
-        teaching_classes=_parse_teaching_classes(user.teaching_classes),
-    )
-    # 滑动续期：同时更新 Refresh Cookie
-    new_refresh = create_refresh_token(
-        user_id=user.id,
-        role=user.role.value,
-        class_id=user.class_id,
-        must_change_password=user.must_change_password,
-        phone=user.phone,
-        teaching_classes=_parse_teaching_classes(user.teaching_classes),
-    )
-    response.set_cookie(
-        key=REFRESH_COOKIE_NAME,
-        value=new_refresh,
-        max_age=_REFRESH_COOKIE_MAX_AGE,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite=settings.cookie_samesite,
-        path="/api/auth",
-    )
+    is_phone_login = bool(payload.get("is_phone_login", False))
+    # 同时恢复用户资料与登录方式，滑动续期后仍保留验证码登录状态。
+    access_token = _issue_tokens(response, user, is_phone_login=is_phone_login)
     return RefreshResponse(
         access_token=access_token,
         must_change_password=user.must_change_password,
         role=user.role.value,
         teaching_classes=_parse_teaching_classes(user.teaching_classes),
+        user=_user_info(user),
+        is_phone_login=is_phone_login,
+        can_switch_student=bool(
+            is_phone_login
+            and user.phone
+            and len(_students_bound_to_phone(db, user.phone)) > 1
+        ),
     )
 
 
@@ -330,7 +316,7 @@ def verify_code(body: VerifyCodeRequest, response: Response, db: Session = Depen
     if len(students) == 1:
         # 单娃：直接签发正式 JWT
         student, _ = students[0]
-        access_token = _issue_tokens(response, student)
+        access_token = _issue_tokens(response, student, is_phone_login=True)
         return VerifyCodeResponse(
             access_token=access_token,
             must_change_password=student.must_change_password,
@@ -424,7 +410,7 @@ def select_student(
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权选择该学生")
 
-    access_token = _issue_tokens(response, student)
+    access_token = _issue_tokens(response, student, is_phone_login=True)
     return TokenResponse(
         access_token=access_token,
         must_change_password=student.must_change_password,

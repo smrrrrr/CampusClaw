@@ -120,6 +120,7 @@ def create_refresh_token(
     must_change_password: bool,
     phone: str | None = None,
     teaching_classes: list[int] | None = None,
+    is_phone_login: bool = False,
 ) -> str:
     """Refresh Token：7d，HttpOnly Cookie 存放。含 phone 供多娃切换重新查询学生列表。"""
     payload: dict = {
@@ -128,6 +129,7 @@ def create_refresh_token(
         "class_id": class_id,
         "must_change_password": must_change_password,
         "phone": phone,
+        "is_phone_login": is_phone_login,
     }
     if teaching_classes is not None:
         payload["teaching_classes"] = teaching_classes

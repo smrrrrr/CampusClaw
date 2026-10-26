@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import CurrentUser, get_current_teacher
-from models import AuditLog, Class, Role, User
+from llm_service import DEFAULT_SYSTEM_PROMPT
+from models import AgentConfig, AuditLog, Class, Role, User
 from security import generate_initial_password, hash_password
 from services import require_teacher_classes, write_audit_log
 
@@ -255,6 +256,84 @@ def reset_password(
         message="密码已重置为初始密码，学生首次登录需修改密码",
         initial_password=initial_password,
     )
+
+
+# ---------------------------------------------------------------------------
+# AI 解题助手 · 班级级提示词与技能配置
+# ---------------------------------------------------------------------------
+
+
+class AgentConfigRequest(BaseModel):
+    class_id: int
+    # 自定义系统提示词；留空表示使用默认提示词
+    system_prompt: str = ""
+    # 「解题引导技能」开关：只给思路引导、不直接给最终答案
+    tutor_enabled: bool = True
+
+
+class AgentConfigResponse(BaseModel):
+    class_id: int
+    system_prompt: str
+    tutor_enabled: bool
+
+
+@router.get("/agent-config", response_model=AgentConfigResponse)
+def get_agent_config(
+    class_id: int = Query(...),
+    current: CurrentUser = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+):
+    """读取某班 AI 解题助手的提示词与技能配置（仅任教班级范围内）。"""
+    require_teacher_classes(current.teaching_classes)
+    if class_id not in (current.teaching_classes or []):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权配置非任教班级的 AI 助手",
+        )
+    cfg = db.query(AgentConfig).filter_by(class_id=class_id).one_or_none()
+    return AgentConfigResponse(
+        class_id=class_id,
+        system_prompt=cfg.system_prompt if cfg is not None else "",
+        tutor_enabled=cfg.tutor_enabled if cfg is not None else True,
+    )
+
+
+@router.put("/agent-config", response_model=AgentConfigResponse)
+def save_agent_config(
+    body: AgentConfigRequest,
+    current: CurrentUser = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+):
+    """保存某班 AI 解题助手的提示词与技能配置（缺省提示词常量随默认值展示）。"""
+    require_teacher_classes(current.teaching_classes)
+    if body.class_id not in (current.teaching_classes or []):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权配置非任教班级的 AI 助手",
+        )
+    cfg = db.query(AgentConfig).filter_by(class_id=body.class_id).one_or_none()
+    if cfg is None:
+        cfg = AgentConfig(class_id=body.class_id, teacher_id=current.user_id)
+        db.add(cfg)
+    cfg.teacher_id = current.user_id
+    cfg.system_prompt = (body.system_prompt or "").strip()
+    cfg.tutor_enabled = body.tutor_enabled
+    db.commit()
+    return AgentConfigResponse(
+        class_id=cfg.class_id,
+        system_prompt=cfg.system_prompt,
+        tutor_enabled=cfg.tutor_enabled,
+    )
+
+
+@router.get("/agent-config/default-prompt", response_model=dict)
+def agent_default_prompt(
+    current: CurrentUser = Depends(get_current_teacher),
+):
+    """返回默认系统提示词与「解题引导技能」文案，供教师端界面预填/预览。"""
+    from llm_service import TUTOR_SKILL_PROMPT
+
+    return {"system_prompt": DEFAULT_SYSTEM_PROMPT, "tutor_skill_prompt": TUTOR_SKILL_PROMPT}
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ from fastapi.responses import Response
 import models  # noqa: F401  # 确保模型注册到 Base.metadata
 from config import settings
 from database import Base, SessionLocal, engine, run_simple_migrations
-from routers import auth, materials, student, teacher
+from routers import applications, auth, materials, mcp, student, teacher
 from security import JWTError, TOKEN_TYPE_ACCESS, decode_token
 from services import write_audit_log
 
@@ -34,9 +34,9 @@ app = FastAPI(
     title="CampusClaw API",
     version="0.1.0",
     lifespan=lifespan,
-    docs_url="/docs" if _docs_enabled else None,
+    docs_url="/api/docs" if _docs_enabled else None,
     redoc_url="/redoc" if _docs_enabled else None,
-    openapi_url="/openapi.json" if _docs_enabled else None,
+    openapi_url="/api/openapi.json" if _docs_enabled else None,
 )
 
 # CORS：前端与后端不同端口，必须允许 credentials（HttpOnly Cookie 刷新）
@@ -52,6 +52,19 @@ app.include_router(auth.router)
 app.include_router(teacher.router)
 app.include_router(student.router)
 app.include_router(materials.router)
+app.include_router(mcp.router)
+app.include_router(applications.router)
+
+if _docs_enabled:
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/docs", include_in_schema=False)
+    def legacy_docs():
+        return RedirectResponse("/api/docs")
+
+    @app.get("/openapi.json", include_in_schema=False)
+    def legacy_openapi():
+        return app.openapi()
 
 
 # ---------------------------------------------------------------------------
